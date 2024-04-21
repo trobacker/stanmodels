@@ -1,0 +1,677 @@
+---
+title: "Logistic Regression with Stan"
+author: "Thomas Robacker"
+date: "2024-02-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(bayesrules)
+library(rstanarm)
+library(tidyverse)
+library(rstan)
+library(gdata)
+library(bayesplot)
+library(tidybayes)
+library(broom.mixed)
+library(modelr)
+#library(loo)
+library(ggthemes); theme_set(theme_clean())
+```
+
+## Heart (Disease) Dataset
+
+This database contains 13 attributes (which have been extracted from
+a larger set of 75)       
+  
+Attribute Information:
+------------------------
+      -- 1. age       
+      -- 2. sex       
+      -- 3. chest pain type  (4 values)       
+      -- 4. resting blood pressure  
+      -- 5. serum cholestoral in mg/dl      
+      -- 6. fasting blood sugar > 120 mg/dl       
+      -- 7. resting electrocardiographic results  (values 0,1,2) 
+      -- 8. maximum heart rate achieved  
+      -- 9. exercise induced angina    
+      -- 10. oldpeak = ST depression induced by exercise relative to rest   
+      -- 11. the slope of the peak exercise ST segment     
+      -- 12. number of major vessels (0-3) colored by flourosopy        
+      -- 13.  thal: 3 = normal; 6 = fixed defect; 7 = reversable defect     
+
+Attributes types
+-----------------
+
+Real: 1,4,5,8,10,12
+Ordered:11,
+Binary: 2,6,9
+Nominal:7,3,13
+
+Variable to be predicted
+------------------------
+Absence (1) or presence (2) of heart disease
+
+Cost Matrix
+
+	 abse  pres
+absence	  0	1
+presence  5	0
+
+where the rows represent the true values and the columns the predicted.
+
+No missing values.
+
+270 observations
+
+
+```{r}
+heart <- read.table("~/Documents/Classes/Independent Study/R Code/LogisticRegression/Data/heart.dat", quote="\"", comment.char="")
+col_names <- c("age", "sex", "cpain", "bp", "chol", "bldsgr", 
+               "ecg", "maxhr", "exangina", "oldpeak", 
+               "stslope", "vessels", "thal", "HD")
+colnames(heart) <- col_names
+colnames(heart)
+# HD = Heart Disease 1/2 is the target variable.  
+heart$HD <- ifelse(heart$HD == '2', 1, 0)
+head(heart$HD)
+class(heart$HD)
+```
+
+
+
+```{r}
+fact_cols <- c("cpain", "ecg", "thal",
+               "sex", "bldsgr", "exangina")
+               #"HD")
+heart[fact_cols] <- lapply(heart[fact_cols] , factor)
+```
+
+```{r}
+str(heart)
+```
+
+
+```{r}
+ggplot(heart, aes(x = as.factor(HD), fill = as.factor(HD))) + geom_bar()
+```
+
+```{r}
+ggplot(heart, aes(x = sex, y = ..count..)) + geom_bar(aes(fill = as.factor(HD)), position="dodge")
+```
+
+## MVP Model
+
+```{r}
+model_1 <- stan_glm(HD ~ sex,
+                    data = heart, family = binomial(link = "logit"),
+                    prior_intercept = normal(0,100),
+                    prior = normal(0,100),
+                    chains = 1,
+                    iter = 5000*2,
+                    seed = 1234,
+                    prior_PD = TRUE # THIS IS TROUBLESOME 
+                    )
+```
+
+```{r}
+summary(model_1)
+```
+
+This is what was causing my initial issues with Stan_GLM:
+
+`prior_PD` argument: A logical scalar (defaulting to FALSE) indicating whether to draw from the prior predictive distribution instead of conditioning on the outcome.
+
+I had this set to TRUE initially, giving different estimates of alpha/beta. 
+
+[Prior Predictive Distribution](https://stats.stackexchange.com/questions/394648/differences-between-prior-distribution-and-prior-predictive-distribution)
+
+```{r}
+## Change target = HD to factor
+model_fac <- stan_glm(HD ~ sex,
+                    data = heart, family = binomial(link = "logit"),
+                    prior_intercept = normal(0,100),
+                    prior = normal(0,100),
+                    chains = 2,
+                    iter = 5000*2,
+                    seed = 1234)#,
+                    #prior_PD = TRUE)
+summary(model_fac)
+```
+
+
+```{r}
+## GLM (MLE)
+# Let's see the usual GLM model and compare
+glm_model <-glm(HD ~ sex, data = heart, family = binomial(link = "logit"))
+summary(glm_model)
+```
+
+
+```{r}
+## STAN Model 1
+N <- dim(heart)[1]
+X <- heart$sex
+y <- heart$HD
+sigma <- 10
+
+fit <- stan(
+  file = "~/Documents/Classes/Independent Study/R Code/LogisticRegression/stan_model1.stan",  # Stan program
+  data = list("X" = as.numeric(as.vector(heart$sex)), 
+              "y" = as.vector(y), 
+              "N" = N, 
+              "sigma" = sigma), # named list of data
+  chains = 2,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 10000,            # total number of iterations per chain
+  cores = 1,              # number of cores (could use one per chain)
+  refresh = 0             # no progress shown
+)
+```
+
+```{r}
+summary(fit) # consistent with my stan_glm version! The usual GLM is what's different
+```
+
+
+
+```{r}
+# Using all predictors
+formula <- as.formula(HD ~ age + sex + cpain + bp + chol + bldsgr + 
+                        ecg + maxhr + exangina + oldpeak + 
+                        vessels + thal)
+
+N <- dim(heart)[1]
+#X <- heart$sex # for one predictor
+#X <- heart[c("age", "sex", "cpain")]
+X <- heart %>% select(-HD)
+X <- data.matrix(X) # 
+P <- dim(X)[2] # Number of predictors
+y <- heart$HD
+
+sigma <- 10
+
+fit <- stan(
+  file = "~/Documents/Classes/Independent Study/R Code/LogisticRegression/stan_model2.stan",  # Stan program
+  data = list("X" = X, 
+              "y" = y, 
+              "N" = N, 
+              "P" = P,
+              "sigma" = sigma), # named list of data
+  chains = 1,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 10000,            # total number of iterations per chain
+  cores = 1,              # number of cores (could use one per chain)
+  refresh = 0             # no progress shown
+)
+```
+
+
+```{r}
+summary(fit)
+```
+
+```{r}
+model_2 <- As.mcmc.list(fit)
+coda::acfplot(model_2)
+#coda::densplot(model_2)
+coda::traceplot(model_2)
+```
+
+```{r}
+# ESS:
+mean(coda::effectiveSize(model_2))/10000
+```
+
+
+
+```{r}
+## Using `model.matrix`
+formula <- as.formula(HD ~ age + sex + cpain + bp + chol + bldsgr + 
+                        ecg + maxhr + exangina + oldpeak + 
+                        vessels + thal)
+
+# Includes an intercept
+X <- model.matrix(formula, data = heart)
+head(X)
+```
+
+
+
+```{r}
+## Model_3
+# Using all predictors and model.matrix
+formula <- as.formula(HD ~ age + sex + cpain + bp + chol + bldsgr + 
+                        ecg + maxhr + exangina + oldpeak + 
+                        vessels + thal)
+
+N <- dim(heart)[1]
+#X <- heart %>% select(-HD)
+#X <- data.matrix(X) # 
+X <- model.matrix(formula, data = heart)
+P <- dim(X)[2] # Number of predictors
+y <- heart$HD
+
+sigma <- 10
+
+fit <- stan(
+  file = "~/Documents/Classes/Independent Study/R Code/LogisticRegression/stan_model2.stan",  # Stan program
+  data = list("X" = X, 
+              "y" = y, 
+              "N" = N, 
+              "P" = P,
+              "sigma" = sigma), # named list of data
+  chains = 1,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 10000,            # total number of iterations per chain
+  cores = 1,              # number of cores (could use one per chain)
+  refresh = 0             # no progress shown
+)
+```
+
+
+```{r}
+model_3 <- As.mcmc.list(fit)
+coda::acfplot(model_3)
+#coda::densplot(model_3)
+coda::traceplot(model_3)
+```
+
+```{r}
+# ESS: model_2
+mean(coda::effectiveSize(model_2))/10000
+
+# model_3 higher ESS than model_2 which uses data.matrix
+mean(coda::effectiveSize(model_3))/10000
+```
+
+
+
+
+```{r}
+summary(fit)
+```
+
+
+## Poisson Regression
+
+```{r}
+# Load data
+data(equality_index)
+equality <- equality_index
+head(equality)
+```
+
+```{r}
+summary(equality)
+```
+
+```{r}
+ggplot(equality, aes(x = laws)) + 
+  geom_histogram(fill = "dodgerblue", color = "black", breaks = seq(0, 160, by = 10))
+```
+
+```{r}
+# Identify the outlier
+equality %>% 
+  filter(laws == max(laws))
+
+# Remove the outlier
+equality <- equality %>% 
+  filter(state != "california")
+```
+```{r}
+summary(equality)
+```
+
+```{r}
+ggplot(equality, aes(x = laws)) + 
+  geom_histogram(fill = "dodgerblue", color = "black", breaks = seq(0, 50, by = 5))
+```
+
+
+```{r}
+ggplot(equality, aes(y = laws, x = percent_urban, color = historical)) + 
+  geom_point()
+```
+
+
+```{r}
+## GLM ML approach
+glm_pois_model <- glm(laws ~ percent_urban + historical, 
+                                 data = equality,
+                                family = poisson)
+summary(glm_pois_model)
+```
+
+
+
+
+```{r}
+## Get Stan code from stan_glm:
+## rstan::get_stanmodel(example_model$stanfit)
+
+### Stan GLM
+equality_model_1 <- stan_glm(laws ~ percent_urban + historical, 
+                                 data = equality, 
+                                 family = poisson,
+                                 prior_intercept = normal(2, 0.5),
+                                 prior = normal(0, 2.5, autoscale = TRUE), 
+                                 chains = 1, iter = 5000*2, seed = 84735)
+                                 #prior_PD = TRUE
+summary(equality_model_1)
+```
+
+
+```{r}
+### Stan Poisson Regression
+
+## Model_3
+# Using all predictors and model.matrix
+formula <- as.formula(laws ~ percent_urban + historical)
+
+N <- dim(equality)[1]
+N_rep <- 10
+X <- model.matrix(formula, data = equality)
+P <- dim(X)[2] # Number of predictors
+y <- equality$laws
+
+sigma <- 100
+
+fit <- stan(
+  file = "~/Documents/Classes/Independent Study/R Code/LogisticRegression/stan_model3.stan",  # Stan program
+  data = list("X" = X, 
+              "y" = y, 
+              "N" = N, 
+              "P" = P,
+              #"N_rep" = N_rep,
+              "sigma" = sigma), # named list of data
+  chains = 1,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 10000,            # total number of iterations per chain
+  cores = 1,              # number of cores (could use one per chain)
+  refresh = 0             # no progress shown
+)
+
+summary(fit)
+```
+
+
+
+
+
+```{r}
+model_4 <- As.mcmc.list(fit)
+coda::acfplot(model_4)
+coda::traceplot(model_4)
+```
+
+
+
+
+
+```{r}
+## From MC
+#y <- ifelse(data[, 14] == 2, 1, 0)
+#n <- length(y)
+#X <- as.matrix(cbind(rep(1, n),
+#                     data[, c(1, 4, 5, 8, 10, 12, 2, 6, 9)],
+#                     ifelse(data$V11 == 2, 1, 0),
+#                     ifelse(data$V11 == 3, 1, 0),
+#                     ifelse(data$V7 == 1, 1, 0),
+#                     ifelse(data$V7 == 2, 1, 0),
+#                     ifelse(data$V3 == 2, 1, 0),
+#                     ifelse(data$V3 == 3, 1, 0),
+#                    ifelse(data$V3 == 4, 1, 0),
+#                     ifelse(data$V13 == 6, 1, 0),
+#                     ifelse(data$V13 == 7, 1, 0)))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+mcmc_trace(model_1)
+```
+
+```{r}
+mcmc_dens_overlay(model_1)
+```
+
+```{r}
+mcmc_acf(model_1)
+```
+
+
+
+## Looking at Age Only
+
+```{r}
+model <- stan_glm(HD ~ age,
+                    data = heart, family = binomial, 
+                    prior_intercept = normal(0,1000),
+                    prior = normal(0,100),
+                    chains = 2,
+                    iter = 5000*2,
+                    seed = 1234,
+                    prior_PD = TRUE)
+summary(model)
+```
+
+https://cran.r-project.org/web/packages/tidybayes/vignettes/tidy-rstanarm.html#model
+
+```{r}
+get_variables(model)
+```
+
+
+```{r}
+model %>%
+  gather_draws(`(Intercept)`, age) %>%
+  median_qi()
+```
+
+```{r}
+#  modelr::data_grid()
+heart %>%
+  data_grid(age) %>%
+  add_epred_draws(model) %>%
+  head(10)
+```
+
+
+```{r}
+heart %>%
+  data_grid(age) %>%
+  add_epred_draws(model) %>%
+  ggplot(aes(x = .epred, y = age)) +
+  stat_pointinterval(.width = c(.66, .95))
+```
+
+
+
+
+
+```{r}
+heart %>% 
+  data_grid(age = seq_range(age, n = 51)) %>%
+  add_epred_draws(model) + 
+  ggplot(aes(x = age, y = HD)) +
+  stat_lineribbon(aes(y = .epred)) 
+```
+
+
+
+
+```{r}
+# Let's see the usual GLM model and compare
+glm_model <-glm(HD ~ sex, data = heart, family = binomial(link = "logit"))
+summary(glm_model)
+```
+
+
+
+```{r}
+glm_model <-glm(HD ~ age, data = heart, family = binomial(link = "logit"))
+summary(glm_model)
+```
+
+Perhaps it would be helpful to visualize the predicted fits for each model 
+and see how they differ. 
+
+```{r}
+heart_pred <- heart %>% 
+  mutate(fitted_value = predict(glm_model, newdata = heart)) %>%
+  mutate(fitted_prob = 1/(1+exp(-fitted_value)))
+heart_pred$HD <- heart_pred$HD %>% as.numeric()
+```
+
+```{r}
+logistic_curve <- function(x, alpha, beta){
+    exp(alpha + beta * x) / (1 + exp(alpha + beta * x))
+}
+```
+
+
+
+```{r}
+## Looks funny because HD is a FACTOR!!
+g <- ggplot(data = heart_pred, aes(x=age, y=HD)) +
+  geom_point() + 
+  geom_jitter(height = 0.05) +
+  labs(x = "Age", y = "Heart Disease") +
+  geom_line(data = heart_pred, mapping = aes(y = fitted_prob),
+            col = "red", size = 1)
+g
+```
+
+```{r}
+ggplot(data = heart_pred, aes(x = age, y = HD)) +
+  # Training data with black points:
+  geom_jitter(height = 0.05) +
+  # Best fitting linear regression line in blue:
+  geom_smooth(method = "lm", se = FALSE) +
+  # Best fitting logistic curve in red:
+  geom_line(data = heart_pred, mapping = aes(y = fitted_prob), col = "red", size = 1) +
+  labs(x = "Age", y = "Heart Disease")
+```
+
+
+
+```{r}
+ggplot(heart_pred, aes(x=age, y=HD)) + geom_point() +
+      stat_smooth(method="glm", color="green", se=FALSE, 
+                method.args = list(family=binomial(link = "logit")))
+```
+
+
+
+```{r}
+glm_model %>%
+  broom::tidy(conf.int = TRUE)
+```
+
+
+
+
+
+## More Complex Model
+
+```{r}
+formula <- as.formula(HD ~ age + sex + cpain + bp + chol + bldsgr + 
+                        ecg + maxhr + exangina + oldpeak + 
+                        vessels + thal)
+
+t_prior <- student_t(df = 7, location = 0, scale = 2.5)
+
+model_2 <- stan_glm(formula,
+                    data = heart, 
+                    family = binomial(link = "logit"), 
+                    #prior_intercept = t_prior,
+                    #prior = t_prior,
+                    chains = 1,
+                    iter = 5000*2,
+                    seed = 1234)
+summary(model_2)
+```
+
+```{r}
+summary(model_2)
+```
+
+```{r}
+pplot<-plot(model_2, "areas", prob = 0.95, prob_outer = 1)
+pplot+ geom_vline(xintercept = 0)
+```
+
+```{r}
+summary(model_2)
+```
+
+```{r}
+log_reg <- glm(formula, family = binomial(link = logit), , data = heart)
+```
+
+```{r}
+summary(log_reg)
+```
+
+
+
+```{r}
+print(get_elapsed_time(fit))
+```
+
+```{r}
+# Get summary as data frame (yes!)
+m2_df <- as.data.frame(model_2$stan_summary)
+
+# Median ESS
+ess <- median(m2_df$n_eff)
+ess
+
+# ESR.
+# ESR, the median effective sample rate, or median ESS divided by the runtime of the sampler in seconds
+runtime <- 0.053
+esr <- ess / runtime
+esr # big difference from 2013!
+```
+
+Compare this median ESS with pg 13 of Polson Scott Windel 2013 (pg. 1347 in 
+total). 
+
+Stan ESS = 1276.625
+
+* PG gives 3527 (Gibbs Sampler - so is a little more efficient)
+* RU-DA gives 621
+* Metropolis gives 1076
+
+HMC is still equally exact as PG.
+
+Check this out for Unbalanced target/response.
+
+Compare GLM fit 
+
+Use N(0,100) for slopes. Uniform for intercept. 
+
+
+Few things to think about:
+
+* Compare to GLM stuff
+* 
+
+matrix data give it the RHS 
+
+model.matrix w/o intercept. 
+
+JAGS..?
+
