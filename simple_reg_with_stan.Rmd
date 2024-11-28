@@ -1,0 +1,52 @@
+---
+title: "Simple Regression with Stan"
+author: "Thomas Robacker"
+date: "2024-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+```
+
+## Simple Linear Regression
+
+```{r}
+df <- read.csv("./Data/simplereg_data")
+head(df)
+```
+
+```{r}
+x <- df$x
+y <- df$y
+N <- dim(df)[1]
+
+
+#Priors 
+#tau <- 100
+#phi <- 100
+# simga <- 100
+
+data_list <- list("x" = x, 
+              "y" = y, 
+              "N" = N)
+```
+
+
+```{r}
+fit <- stan(
+  file = "./Stan/simple_reg.stan",  # Stan program
+  data = data_list, # named list of data
+  chains = 1,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 4000,            # total number of iterations per chain
+  refresh = 0             # no progress shown
+)
+```
+
+
+```{r}
+summary(fit)
+```
+

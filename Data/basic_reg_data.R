@@ -1,0 +1,11 @@
+## Generate simple regression data
+set.seed(77)
+n <- 100
+x <- round(runif(n, min = 0, max = 10),2)
+eps <- round(rnorm(n, mean = 0, sd = 2), 2)
+
+## Y = 2X + N(0,4)
+y <- 2*x+eps
+
+df <- data.frame("x" = x, "y" = y)
+write.csv(df, file = "./simplereg_data")
