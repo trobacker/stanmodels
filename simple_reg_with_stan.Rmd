@@ -50,3 +50,5 @@ fit <- stan(
 summary(fit)
 ```
 
+## Missing Data Simple Linear Regression
+
