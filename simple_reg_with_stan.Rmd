@@ -52,3 +52,46 @@ summary(fit)
 
 ## Missing Data Simple Linear Regression
 
+```{r}
+df <- suppressMessages(read_csv("./Data/simpleregwithNA_data"))
+df <- df[, -1]
+head(df)
+sum(is.na(df))
+```
+
+```{r}
+# Split x and y into observed and missing components. 
+# We are using the predictors X (none missing) for the missing y's 
+y_obs <- df$y_na[!is.na(df$y_na)]
+x_obs <- df$x[!is.na(df$y_na)]
+x_mis <- df$x[is.na(df$y_na)]
+N_obs <- length(y_obs)
+N <- dim(df)[1]
+N_mis <- N - N_obs
+
+data_list <- list("x_obs" = x_obs, 
+              "x_mis" = x_mis,
+              "y_obs" = y_obs, 
+              "N_obs" = N_obs,
+              "N_mis" = N_mis)
+
+fit <- stan(
+  file = "./Stan/simple_reg_NA.stan",  # Stan program
+  data = data_list, # named list of data
+  chains = 1,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 4000,            # total number of iterations per chain
+  refresh = 0             # no progress shown
+)
+```
+
+
+```{r}
+## Fits the missing y's as unknown parameters
+summary(fit)
+```
+
+
+
+
+

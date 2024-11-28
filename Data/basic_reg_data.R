@@ -15,7 +15,7 @@ df <- data.frame("x" = x, "y" = y)
 id_remove <- rbinom(n = n, size = 1, prob = 0.10)
 df["missing"] <- id_remove
 
-df %>%
-  mutate(x_na = if_else( (missing > 0), NA_real_, x))
+df <- df %>%
+  mutate(y_na = if_else( (missing > 0), NA_real_, y))
 
 write.csv(df, file = "./Data/simpleregwithNA_data")
