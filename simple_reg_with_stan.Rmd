@@ -60,6 +60,8 @@ sum(is.na(df))
 ```
 
 ```{r}
+# Easy version, for alternatives:
+# https://mc-stan.org/docs/stan-users-guide/missing-data.html
 # Split x and y into observed and missing components. 
 # We are using the predictors X (none missing) for the missing y's 
 y_obs <- df$y_na[!is.na(df$y_na)]

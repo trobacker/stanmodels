@@ -1,0 +1,70 @@
+---
+title: "Synthetic Bayes HMLR"
+author: "Thomas Robacker"
+date: "2024-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synthetic Bayesian HMLR Stan Fit
+
+```{r}
+df <- suppressMessages(read_csv("./Data/syn_hmlr_dat.csv"))
+head(df)
+sum(is.na(df))
+```
+
+```{r}
+df$clade <- as.numeric(as.factor(df$clade))
+head(df)
+```
+
+```{r}
+## Adapting to Copilot stan code!
+# df is NxK indexed by date, will drop date for STAN input
+df <- pivot_wider(dat, names_from = clade, values_from = prop)
+head(df) 
+
+df_stan <- df[,-1]
+head(df_stan)
+```
+
+
+```{r}
+N <- dim(df_stan)[1]
+K <- 3
+#y <- df$prop
+y <- as.matrix(df_stan*100)
+colnames(y) <- NULL
+storage.mode(y) <- "integer"
+
+data_list <- list("N" = N, 
+              "K" = K,
+              "y" = y, 
+              "time" = 1:10)
+
+fit <- stan(
+  file = "./Stan/hmlr_stan.stan",  # Stan program
+  data = data_list, # named list of data
+  chains = 1,             # number of Markov chains
+  warmup = 1000,          # number of warmup iterations per chain
+  iter = 4000,            # total number of iterations per chain
+  refresh = 0             # no progress shown
+)
+```
+
+
+```{r}
+summary(fit)
+```
+
+```{r}
+launch_shinystan(fit)
+```
+
+
+
+
